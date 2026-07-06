@@ -4,6 +4,8 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/memstore"
@@ -133,6 +135,46 @@ func copyright() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		ctx.Writer.Header().Set("Payment-Gateway", "https://github.com/v03413/BEpusdt")
 	}
+}
+
+// PayCors 收银台页面（如通过第三方 CDN 域名反代访问）需要跨域调用 /api/v1/pay/*
+// 查询支付状态，此处按 CORS_ALLOWED_ORIGINS（逗号分隔）放行；未配置时默认放行任意来源，
+// 因为这些接口本身面向匿名客户端，不含鉴权信息，安全性依赖 trade_id 的随机性而非同源限制。
+func PayCors() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		origin := ctx.GetHeader("Origin")
+		if origin != "" && isAllowedCorsOrigin(origin) {
+			ctx.Header("Access-Control-Allow-Origin", origin)
+			ctx.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			ctx.Header("Access-Control-Allow-Headers", "Content-Type")
+			ctx.Header("Vary", "Origin")
+		}
+
+		if ctx.Request.Method == http.MethodOptions {
+			ctx.AbortWithStatus(http.StatusNoContent)
+
+			return
+		}
+
+		ctx.Next()
+	}
+}
+
+func isAllowedCorsOrigin(origin string) bool {
+	var allowed = os.Getenv("CORS_ALLOWED_ORIGINS")
+	if allowed == "" {
+
+		return true
+	}
+
+	for _, o := range strings.Split(allowed, ",") {
+		if strings.TrimSpace(o) == origin {
+
+			return true
+		}
+	}
+
+	return false
 }
 
 func PostRegister(router *gin.RouterGroup, relativePath string, checkAuth bool, handlers ...gin.HandlerFunc) {

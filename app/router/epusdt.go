@@ -22,6 +22,11 @@ func epusdtInit(engine *gin.Engine) {
 
 	payGrp := engine.Group("/api/v1/pay")
 	{
+		payGrp.Use(PayCors())
+		payGrp.OPTIONS("/info", func(*gin.Context) {})
+		payGrp.OPTIONS("/notify", func(*gin.Context) {})
+		payGrp.OPTIONS("/methods", func(*gin.Context) {})
+		payGrp.OPTIONS("/update-order", func(*gin.Context) {})
 		payGrp.POST("/info", epHdr.Info)
 		payGrp.POST("/notify", epHdr.Notify)
 		payGrp.POST("/methods", epHdr.GetMethods)
