@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 
 	"github.com/gin-gonic/gin"
@@ -21,7 +22,7 @@ type Epay struct {
 
 type submit struct {
 	Pid        string     `form:"pid" json:"pid" binding:"required"` // 商户号
-	Type       string     `form:"type" json:"type" binding:"required"`
+	Type       string     `form:"type" json:"type"` // 可选：易支付收银台模式(epay_cashier)不传 type，缺省时回退默认交易类型
 	NotifyURL  string     `form:"notify_url" json:"notify_url" binding:"required"`
 	ReturnURL  string     `form:"return_url" json:"return_url" binding:"required"`
 	OutTradeNo string     `form:"out_trade_no" json:"out_trade_no" binding:"required"`
@@ -66,6 +67,14 @@ func (e Epay) Submit(ctx *gin.Context) {
 		ctx.String(200, "签名错误")
 
 		return
+	}
+
+	// 兼容易支付收银台模式：type 缺省时使用默认交易类型（验签基于原始参数，此处注入不影响签名）
+	if data.Type == "" {
+		data.Type = os.Getenv("EPAY_DEFAULT_TRADE_TYPE")
+		if data.Type == "" {
+			data.Type = string(model.UsdtTrc20)
+		}
 	}
 
 	if !utils.IsAllowedCallbackURL(data.NotifyURL) {
@@ -124,7 +133,8 @@ func (e Epay) verify(data map[string]string) (submit, error) {
 		return params, fmt.Errorf("BEpusdt 易支付兼容模式，商户号【PID】必须固定为" + Pid)
 	}
 
-	var requiredFields = []string{"pid", "type", "out_trade_no", "notify_url", "return_url", "name", "money", "sign"}
+	// type 不在必填列表：易支付收银台模式(epay_cashier)不传 type，由 Submit 注入默认交易类型
+	var requiredFields = []string{"pid", "out_trade_no", "notify_url", "return_url", "name", "money", "sign"}
 	for _, field := range requiredFields {
 		if _, ok := data[field]; !ok || data[field] == "" {
 
