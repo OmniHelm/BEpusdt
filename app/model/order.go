@@ -340,6 +340,17 @@ func GetTradeOrder(tradeId string) (Order, bool) {
 	return order, res.RowsAffected > 0
 }
 
+// GetWaitingOrderByOrderId 按商户订单号查最新一笔待支付订单。
+// 供收银台入口反查 trade_id 构造跳转链接使用（如宿主前端仅拿到商户订单号、
+// 未能正确回传 BEpusdt 生成的收银台深链时）。仅返回 waiting 状态订单——
+// 已支付/已过期/已取消的订单查不到，避免通过商户订单号枚举历史订单信息。
+func GetWaitingOrderByOrderId(orderId string) (Order, bool) {
+	var order Order
+	res := Db.Where("order_id = ? AND status = ?", orderId, OrderStatusWaiting).Order("id desc").Limit(1).Find(&order)
+
+	return order, res.RowsAffected > 0
+}
+
 func GetOrderByStatus(Status int) []Order {
 	orders := make([]Order, 0)
 

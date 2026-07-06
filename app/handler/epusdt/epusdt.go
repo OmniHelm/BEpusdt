@@ -59,6 +59,10 @@ type infoReq struct {
 	TradeID string `json:"trade_id" binding:"required"`
 }
 
+type resolveReq struct {
+	OrderID string `json:"order_id" binding:"required"`
+}
+
 type methodsReq struct {
 	TradeID  string `json:"trade_id" binding:"required"`
 	Currency string `json:"currency"`
@@ -119,11 +123,8 @@ func (Epusdt) CreateOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 解析请求地址
-	host := "http://" + ctx.Request.Host
-	if ctx.Request.TLS != nil {
-		host = "https://" + ctx.Request.Host
-	}
+	// 解析请求地址（优先信任 X-Forwarded-Proto 等转发头，兼容经反向代理/CDN 访问场景）
+	host := utils.GetRequestHost(ctx.Request)
 
 	if req.Fiat == "" {
 		req.Fiat = model.CNY
@@ -172,11 +173,8 @@ func (Epusdt) UpdateOrder(ctx *gin.Context) {
 		return
 	}
 
-	// 解析请求地址
-	host := "http://" + ctx.Request.Host
-	if ctx.Request.TLS != nil {
-		host = "https://" + ctx.Request.Host
-	}
+	// 解析请求地址（优先信任 X-Forwarded-Proto 等转发头，兼容经反向代理/CDN 访问场景）
+	host := utils.GetRequestHost(ctx.Request)
 
 	// 获取订单
 	order, ok := model.GetTradeOrder(req.TradeID)
@@ -411,6 +409,29 @@ func (Epusdt) Info(ctx *gin.Context) {
 		"support_url":   model.GetC(model.PaymentSupportUrl), // 客服链接
 		"redirect_url":  order.RedirectUrl(),                 // 跳转地址
 		"reselect":      order.CanReselectPayment(),          // 是否允许确认交易类型后重选
+	}))
+}
+
+// Resolve 按商户订单号（out_trade_no）反查收银台跳转链接。
+// 场景：宿主平台（如通过易支付兼容层接入的第三方 CDN）下单响应里只带回了
+// 网关配置地址，没有正确回填 submit.php 302 跳转出的收银台深链时，前端可
+// 用已知的商户订单号换取真实 payment_url，直接跳转而非解析当前页面路径。
+func (Epusdt) Resolve(ctx *gin.Context) {
+	var req resolveReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(200, respFailJson(fmt.Sprintf("参数错误：%s", err.Error())))
+		return
+	}
+
+	order, ok := model.GetWaitingOrderByOrderId(req.OrderID)
+	if !ok {
+		ctx.JSON(200, respFailJson("订单不存在或已完成"))
+		return
+	}
+
+	ctx.JSON(200, respSuccJson(gin.H{
+		"trade_id":    order.TradeId,
+		"payment_url": model.CheckoutUrl(utils.GetRequestHost(ctx.Request), order.TradeId),
 	}))
 }
 

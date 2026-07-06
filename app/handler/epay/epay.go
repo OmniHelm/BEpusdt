@@ -114,13 +114,7 @@ func (e Epay) Submit(ctx *gin.Context) {
 		return
 	}
 
-	// 解析请求地址
-	var host = "http://" + ctx.Request.Host
-	if ctx.Request.TLS != nil {
-		host = "https://" + ctx.Request.Host
-	}
-
-	ctx.Redirect(http.StatusFound, model.CheckoutUrl(host, order.TradeId))
+	ctx.Redirect(http.StatusFound, model.CheckoutUrl(utils.GetRequestHost(ctx.Request), order.TradeId))
 }
 
 // verify 验证请求参数
