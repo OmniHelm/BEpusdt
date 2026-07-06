@@ -49,6 +49,29 @@ func Register(t Task) {
 	tasks = append(tasks, t)
 }
 
+// waitQueueIdle 阻塞等待扫描队列长度降到拥堵阈值以下，ctx 取消时返回 false。
+// 回溯推送用它取代旧的"拥堵即放弃"逻辑：一次回溯要么完整推完所有区块，
+// 要么随进程退出（内存标记同时消失），不存在推送到一半被跳过却再也不重试的状态。
+func waitQueueIdle(ctx context.Context, queueLen func() int) bool {
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+
+		if queueLen() < blockQueueLimit {
+			return true
+		}
+
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(time.Second * 3):
+		}
+	}
+}
+
 func Start(ctx context.Context) {
 	mu.Lock()
 	defer mu.Unlock()

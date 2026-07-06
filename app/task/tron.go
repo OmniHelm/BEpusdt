@@ -115,24 +115,30 @@ func (t *tron) lookbackBlocks(ctx context.Context) {
 		return
 	}
 
-	startAt, endAt, ok := getLookbackUnix(conf.Tron)
+	startAt, endAt, ids, ok := getLookbackUnix(conf.Tron)
 	if !ok {
 		return
 	}
 
 	start, end := blockapi.New().GetBoundaryHeights(startAt, endAt, conf.Tron)
+	if start <= 0 || end < start {
+		// 边界换算服务异常，本轮放弃且不标记订单，下一轮定时触发重试
+		log.Task.Warn(fmt.Sprintf("回溯边界换算异常(Tron)：start=%d end=%d，本轮跳过", start, end))
+
+		return
+	}
+
 	for i := int(start); i <= int(end); i++ {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if t.syncBreak() {
+		// 队列拥堵时等待而非放弃，保证本批订单的区块完整入队
+		if !waitQueueIdle(ctx, t.blockScanQueue.Len) {
 			return
 		}
 		t.blockScanQueue.In <- i
 		time.Sleep(time.Millisecond * 250) // 速率控制
 	}
+
+	markLookbackDone(ids)
+	log.Task.Info(fmt.Sprintf("回溯推送完成(Tron)：区块 %d → %d，覆盖订单 %d 笔", start, end, len(ids)))
 }
 
 func (t *tron) blockDispatch(ctx context.Context) {

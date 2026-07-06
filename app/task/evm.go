@@ -131,7 +131,7 @@ func (e *evm) lookbackBlocks(ctx context.Context) {
 		return
 	}
 
-	startAt, endAt, ok := getLookbackUnix(model.Network(e.Network))
+	startAt, endAt, ids, ok := getLookbackUnix(model.Network(e.Network))
 	if !ok {
 		return
 	}
@@ -142,13 +142,16 @@ func (e *evm) lookbackBlocks(ctx context.Context) {
 	}
 
 	start, end := blockapi.New().GetBoundaryHeights(startAt, endAt, e.Network)
+	if start <= 0 || end < start {
+		// 边界换算服务异常，本轮放弃且不标记订单，下一轮定时触发重试
+		log.Task.Warn(fmt.Sprintf("回溯边界换算异常(%s)：start=%d end=%d，本轮跳过", e.Network, start, end))
+
+		return
+	}
+
 	for i := start; i <= end; i += blockParseMaxNum {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if syncBreak(e.Network, e.blockScanQueue.Len()) {
+		// 队列拥堵时等待而非放弃，保证本批订单的区块完整入队
+		if !waitQueueIdle(ctx, e.blockScanQueue.Len) {
 			return
 		}
 		to := i + blockParseMaxNum - 1
@@ -158,6 +161,9 @@ func (e *evm) lookbackBlocks(ctx context.Context) {
 		e.blockScanQueue.In <- evmBlock{From: i, To: to}
 		time.Sleep(interval)
 	}
+
+	markLookbackDone(ids)
+	log.Task.Info(fmt.Sprintf("回溯推送完成(%s)：区块 %d → %d，覆盖订单 %d 笔", e.Network, start, end, len(ids)))
 }
 
 func (e *evm) blockDispatch(ctx context.Context) {

@@ -134,19 +134,22 @@ func (a *aptos) lookbackVersion(ctx context.Context) {
 		return
 	}
 
-	startAt, endAt, ok := getLookbackUnix(conf.Aptos)
+	startAt, endAt, ids, ok := getLookbackUnix(conf.Aptos)
 	if !ok {
 		return
 	}
 
 	start, end := blockapi.New().GetBoundaryHeights(startAt, endAt, conf.Aptos)
+	if start <= 0 || end < start {
+		// 边界换算服务异常，本轮放弃且不标记订单，下一轮定时触发重试
+		log.Task.Warn(fmt.Sprintf("回溯边界换算异常(Aptos)：start=%d end=%d，本轮跳过", start, end))
+
+		return
+	}
+
 	for i := int(start); i <= int(end); i += a.versionChunkSize {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if syncBreak(conf.Aptos, a.versionQueue.Len()) {
+		// 队列拥堵时等待而非放弃，保证本批订单的区块完整入队
+		if !waitQueueIdle(ctx, a.versionQueue.Len) {
 			return
 		}
 		limit := a.versionChunkSize
@@ -156,6 +159,9 @@ func (a *aptos) lookbackVersion(ctx context.Context) {
 		a.versionQueue.In <- version{Start: i, Limit: limit}
 		time.Sleep(time.Millisecond * 200) // 速率控制
 	}
+
+	markLookbackDone(ids)
+	log.Task.Info(fmt.Sprintf("回溯推送完成(Aptos)：version %d → %d，覆盖订单 %d 笔", start, end, len(ids)))
 }
 
 func (a *aptos) versionDispatch(ctx context.Context) {

@@ -293,7 +293,11 @@ func hasLookbackOrders(tradeType []model.TradeType) bool {
 	return count > 0
 }
 
-func getLookbackUnix(network model.Network) (startAt, endAt int64, ok bool) {
+// getLookbackUnix 计算需要回溯扫描的时间范围，并返回涉及订单的 ID 列表。
+// 此处不做任何"已回溯"标记：调用方必须在对应区块全部成功入队之后调用
+// markLookbackDone(ids)；中途失败（进程退出、边界换算异常等）则不标记，
+// 下一轮定时触发会重新把这批订单纳入回溯，避免"标记了却没扫"的漏单。
+func getLookbackUnix(network model.Network) (startAt, endAt int64, ids []int64, ok bool) {
 	trade := model.GetNetworkTrades(network)
 	if len(trade) == 0 {
 		return
@@ -321,22 +325,36 @@ func getLookbackUnix(network model.Network) (startAt, endAt int64, ok bool) {
 	// 起点：最早的创建时间（已按 created_at asc 排序）
 	startAt = pending[0].CreatedAt.Time().Unix()
 
-	// 终点：最晚的已过期 expired_at；若全部尚未过期则用当前时间
-	endAt = time.Now().Unix()
+	// 终点：每个订单的可支付窗口截止于 min(expired_at, now)，取全体最大值；
+	// 不能只取"最后一个已过期订单"的过期时间，否则当 pending 中同时存在
+	// 已过期与未过期订单时，晚创建订单的历史窗口会被截掉却仍被标记完成
+	now := time.Now().Unix()
+	endAt = startAt
 	for _, o := range pending {
-		if o.ExpiredAt.Before(time.Now()) && o.ExpiredAt.Unix() > startAt {
-			endAt = o.ExpiredAt.Unix()
+		e := o.ExpiredAt.Unix()
+		if e > now {
+			e = now
 		}
+		if e > endAt {
+			endAt = e
+		}
+	}
+
+	ids = make([]int64, 0, len(pending))
+	for _, o := range pending {
+		ids = append(ids, o.ID)
 	}
 
 	ok = true
 
-	// 标记这批订单已回溯，后续不再重复触发
-	for _, o := range pending {
-		lookbackDone.Store(o.ID, struct{}{})
-	}
-
 	return
+}
+
+// markLookbackDone 标记订单已完成回溯；仅当对应区块全部成功入队后才允许调用。
+func markLookbackDone(ids []int64) {
+	for _, id := range ids {
+		lookbackDone.Store(id, struct{}{})
+	}
 }
 
 func expireWaitingOrders() {

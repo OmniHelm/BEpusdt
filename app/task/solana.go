@@ -388,22 +388,28 @@ func (s *solana) lookbackSlots(ctx context.Context) {
 		return
 	}
 
-	startAt, endAt, ok := getLookbackUnix(conf.Solana)
+	startAt, endAt, ids, ok := getLookbackUnix(conf.Solana)
 	if !ok {
 		return
 	}
 
 	start, end := blockapi.New().GetBoundaryHeights(startAt, endAt, conf.Solana)
+	if start <= 0 || end < start {
+		// 边界换算服务异常，本轮放弃且不标记订单，下一轮定时触发重试
+		log.Task.Warn(fmt.Sprintf("回溯边界换算异常(Solana)：start=%d end=%d，本轮跳过", start, end))
+
+		return
+	}
+
 	for i := int(start); i <= int(end); i++ {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if syncBreak(conf.Solana, s.slotQueue.Len()) {
+		// 队列拥堵时等待而非放弃，保证本批订单的区块完整入队
+		if !waitQueueIdle(ctx, s.slotQueue.Len) {
 			return
 		}
 		s.slotQueue.In <- i
 		time.Sleep(time.Millisecond * 200)
 	}
+
+	markLookbackDone(ids)
+	log.Task.Info(fmt.Sprintf("回溯推送完成(Solana)：slot %d → %d，覆盖订单 %d 笔", start, end, len(ids)))
 }

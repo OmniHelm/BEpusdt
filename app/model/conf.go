@@ -230,7 +230,16 @@ func GetInstallInfo() gin.H {
 }
 
 func GetTronGridApiKeys() []string {
-	return strings.Split(GetK(RpcEndpointTronGridApiKey), ",")
+	// 过滤空串：strings.Split("", ",") 会返回 [""]，若不过滤，未配置 Key 时
+	// 每个请求都会带上一个空值的 TRON-PRO-API-KEY 头，被节点按无效凭证拒绝
+	var keys []string
+	for _, k := range strings.Split(GetK(RpcEndpointTronGridApiKey), ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			keys = append(keys, k)
+		}
+	}
+
+	return keys
 }
 
 func FillDefaultConf() {
