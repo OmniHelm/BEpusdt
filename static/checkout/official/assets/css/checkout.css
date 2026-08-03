@@ -1,7 +1,7 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-    /* 对齐 veilx 客户端设计 token(src/styles/tokens.css) */
+    /* 对齐 Pipio 品牌视觉 */
     --color-bg: #f4f5f8;
     --color-card: #ffffff;
     --color-border: #e4e7ec;
